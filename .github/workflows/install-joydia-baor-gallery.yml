@@ -1,0 +1,61 @@
+name: Install Joydia Baor eight-photo gallery
+on:
+  push:
+    paths:
+      - '.github/workflows/install-joydia-baor-gallery.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  install-gallery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Extract verified eight JPGs and replace only Joydia Baor blog photos
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import re
+          archive = Path('public/assets/BDTAT_Joydia_8_Photo_Replacement.zip')
+          assert archive.is_file(), 'Previously uploaded Joydia ZIP not found'
+          base = Path('public/assets/joydia-baor')
+          base.mkdir(parents=True, exist_ok=True)
+          with ZipFile(archive) as z:
+              for i in range(1,9):
+                  name = f'public/assets/joydia-baor/joydia-baor-{i:02d}.jpg'
+                  data = z.read(name)
+                  assert data[:3] == bytes.fromhex('ffd8ff') and len(data) > 10000, f'Invalid JPG: {name}'
+                  (base / f'joydia-baor-{i:02d}.jpg').write_bytes(data)
+          p = Path('content/blog.html')
+          s = p.read_text(encoding='utf-8')
+          start = s.index('<article class="blog-post" id="joydia-baor-jhenaidah-lotus-travel-guide"')
+          end = s.index('</article>',start)+len('</article>')
+          article = s[start:end]
+          article, removed = re.subn(r'<figure class="blog-photo">.*?</figure>', '', article, flags=re.S)
+          assert removed >= 1, 'No old photo blocks to replace'
+          photos = []
+          for i in range(1,9):
+              src = f'/assets/joydia-baor/joydia-baor-{i:02d}.jpg'
+              photos.append(f'<figure class="blog-photo"><img src="{src}" alt="Joydia Baor scenic photo {i}" loading="lazy" decoding="async"><figcaption>Joydia Baor / জয়দিয়া বাঁওড় — ছবি {i}</figcaption></figure>')
+          block = '\n<section class="joydia-photo-gallery" aria-label="Joydia Baor photo gallery">\n<h3>Joydia Baor Photo Gallery | জয়দিয়া বাঁওড় ছবির গ্যালারি</h3>\n'+'\n'.join(photos)+'\n</section>\n'
+          needle = '<p class="blog-date"><time datetime="2026-11-13">13 November 2026</time></p>'
+          assert needle in article, 'Blog photo insertion point not found'
+          article = article.replace(needle,needle+block,1)
+          article = re.sub(r'<p><strong>ব্লগের ছবিগুলো কি জয়দিয়া বাঁওড়ের\?</strong>.*?</p>', '', article, flags=re.S)
+          article = re.sub(r'<p><strong>Are the images from Joydia Baor\?</strong>.*?</p>', '', article, flags=re.S)
+          p.write_text(s[:start]+article+s[end:], encoding='utf-8')
+          print(f'Installed 8 JPGs; replaced {removed} old figures')
+          PY
+      - name: Commit new photos and updated blog
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add content/blog.html public/assets/joydia-baor/*.jpg
+          git diff --cached --exit-code && exit 0
+          git commit -m "Replace Joydia Baor blog photos with 8 uploaded images"
+          git push
